@@ -1,6 +1,6 @@
 
 from transformers import GPT2Tokenizer, GPT2LMHeadModel
-import os, random
+import os, random, re
 import streamlit as st
 import torch
 import json
@@ -140,6 +140,7 @@ def generate(input_text_dia, input_text_kno, input_text_tgt):
 def bleu_fn(references, candidates):
     score_list = []
     for ref, can in zip(references, candidates):
+        can = normalize_answer(can)
         reference = [" ".join(jieba.cut(ref)).split()]  # may have multiple ref, need [[ref1]]
         candidate = " ".join(jieba.cut(can)).split()
 
@@ -166,14 +167,33 @@ def f1_fn(references, candidates):
 
     pre, re, f1 = [],[],[]
     for ref, can in zip(references, candidates):
+        can = normalize_answer(can)
         reference = [" ".join(jieba.cut(ref)).split()]
         candidate = " ".join(jieba.cut(can)).split()
         
-        (_pre, _re, _f1)  = [pre_recall_f1(r, candidate) for r in reference]
+        (_pre, _re, _f1)  = [pre_recall_f1(r, candidate) for r in reference][0]
         pre.append(_pre)
         re.append(_re)
         f1.append(_f1)
     return sum(pre)/len(pre), sum(re)/len(re), sum(f1)/len(f1)
+
+def normalize_answer(s):
+    """Lower text and remove punctuation, articles and extra whitespace."""
+    re_art = re.compile(r"\b(是|的|啊)\b")
+    re_punc = re.compile(r"[!\"#$%&()*+,-./:;<=>?@\[\]\\^`{|}~_\'，。？！]")
+    def remove_articles(text):
+        return re_art.sub(" ", text)
+
+    def white_space_fix(text):
+        return " ".join(text.split())
+
+    def remove_punc(text):
+        return re_punc.sub(" ", text)  # convert punctuation to spaces
+
+    def lower(text):
+        return text.lower()
+
+    return white_space_fix(remove_articles(remove_punc(lower(s))))
 
 def inference(example_id):            
     data_file = "/cognitive_comp/yangqi/data/DuSinc/dev_dial.json"
@@ -207,7 +227,8 @@ def inference(example_id):
     else: # eval with dev
         candidates, references = [],[]
         with st.spinner("正在评估中"):
-            for idx in tqdm(range(len(examples))):
+            #for idx in tqdm(range(len(examples))):
+            for idx in tqdm(range(30)):
                 kno, src, tgt = preprocess(examples, idx, context=1)
                 output = generate(src, kno, tgt)
 
@@ -218,8 +239,13 @@ def inference(example_id):
             st.write(candidates)
             st.write("reference")
             st.write(references)
-            score = f1_fn(references, candidates)
-            st.write(f"Bleu score on dev : {score}")
+            bleu_score = bleu_fn(references, candidates)
+            f1_score = f1_fn(references, candidates)
+            st.write(f"Bleu score on dev : {bleu_score:.4f}")
+            st.write(f"Prec score on dev : {f1_score[0]:.4f}")
+            st.write(f"Re   score on dev : {f1_score[1]:.4f}")
+            st.write(f"F1   score on dev : {f1_score[2]:.4f}")
+
 
 
 
@@ -239,8 +265,7 @@ top_p =     sbform.slider('Top-P:',min_value=0.0,max_value=1.0,value=0.6,step=0.
 rep_pen =      sbform.slider('Repeat Penalty:',min_value=1.0,max_value=2.0,value=1.1,step=0.1)
 context = sbform.number_input('上下文句子数:',min_value=0,max_value=5,value=1,step=1)
 model_id = sbform.selectbox('选择模型',
-    ['Wenzhong-Finetune-Loss0.39',
-     'Wenzhong-Finetune-Loss0.2',
+    ['Wenzhong-Finetune-Loss0.2',
      'Wenzhong-Finetune-Loss0.1',
      'Wenzhong-GPT2-110M',
      'Wenzhong-GPT2-3.5B'])
